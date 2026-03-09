@@ -56,7 +56,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", conf.refreshApiToken)
 	mux.HandleFunc("POST /api/revoke", conf.revokeRefreshToken)
 	mux.HandleFunc("GET /api/users", conf.getUserByEmail)
-	mux.HandleFunc("PUT /api/users", conf.getUserByEmail)
+	mux.HandleFunc("PUT /api/users", conf.updateLoginCredentials)
 
 	mux.HandleFunc("POST /api/chirps", conf.createChirp)
 	mux.HandleFunc("GET /api/chirps", conf.getAllChirps)
@@ -268,6 +268,75 @@ func (cfg *apiConfig) refreshApiToken(w http.ResponseWriter, r *http.Request) {
 
 	respondWithJSON(w, http.StatusOK, response{
 		Token: jwt,
+	})
+}
+
+func (cfg *apiConfig) updateLoginCredentials(w http.ResponseWriter, r *http.Request) {
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Invalid bearer token -> %s", token))
+		return
+	}
+
+	uid, err := auth.ValidateJWT(token, cfg.auth_secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Failed to validate JWT -> %s", err))
+		return
+	}
+
+	user, err := cfg.db.GetUserByUUID(context.Background(), uid)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Invalid bearer token -> %s", err))
+	}
+
+	type requestData struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	decoder := json.NewDecoder(r.Body)
+
+	var rData requestData
+	if err := decoder.Decode(&rData); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed ot read user data")
+		return
+	}
+
+	type response struct {
+		Email string `json:"email"`
+	}
+
+	if user.Email != rData.Email {
+		respondWithJSON(w, http.StatusOK, response{
+			Email: rData.Email,
+		})
+		return
+	}
+
+	eUser, err := cfg.db.GetUserByEmail(context.Background(), rData.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Failed to get user by email.")
+		return
+	}
+
+	hPassword, err := auth.HashPassword(rData.Password)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Failed to hash new password.")
+		return
+	}
+
+	params := database.UpdateUserPasswordParams{
+		HashedPassword: hPassword,
+		Email:          eUser.Email,
+	}
+
+	if err := cfg.db.UpdateUserPassword(context.Background(), params); err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Failed to update new password.")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, response{
+		Email: user.Email,
 	})
 }
 
