@@ -59,8 +59,9 @@ func main() {
 	mux.HandleFunc("PUT /api/users", conf.updateLoginCredentials)
 
 	mux.HandleFunc("POST /api/chirps", conf.createChirp)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", conf.deleteChirp)
 	mux.HandleFunc("GET /api/chirps", conf.getAllChirps)
-	mux.HandleFunc("GET /api/chirps/{chirpId}", conf.getChirp)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", conf.getChirp)
 
 	mux.HandleFunc("POST /admin/reset", conf.reset)
 	mux.HandleFunc("GET /admin/metrics", conf.metrics)
@@ -355,6 +356,44 @@ func (cfg *apiConfig) revokeRefreshToken(w http.ResponseWriter, r *http.Request)
 	respondWithError(w, http.StatusNoContent, "Revoked refresh token.")
 }
 
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, http.StatusForbidden, "No chirpID present in query.")
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Bearer refresh token is invalid.")
+		return
+	}
+
+	uid, err := auth.ValidateJWT(token, cfg.auth_secret)
+	if err != nil {
+		respondWithError(w, http.StatusForbidden, fmt.Sprintf("Failed to validate JWT -> %s", err))
+		return
+	}
+
+	chirp, err := cfg.db.GetPost(context.Background(), id)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Failed to get chirp from database")
+		return
+	}
+
+	if chirp.UserID != uid {
+		respondWithError(w, http.StatusForbidden, "User id does not match poster of chirp.")
+		return
+	}
+
+	if err := cfg.db.DeletePost(r.Context(), chirp.ID); err != nil {
+		respondWithError(w, http.StatusUnauthorized, "User id does not match poster of chirp.")
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, "")
+}
+
 func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 	type chirpRequest struct {
 		Body   string    `json:"body"`
@@ -446,7 +485,7 @@ func (cfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 
-	uid, err := uuid.Parse(r.PathValue("chirpId"))
+	uid, err := uuid.Parse(r.PathValue("chirpID"))
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Invalid uuid")
 		return
