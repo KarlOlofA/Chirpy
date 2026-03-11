@@ -66,6 +66,8 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", conf.reset)
 	mux.HandleFunc("GET /admin/metrics", conf.metrics)
 
+	mux.HandleFunc("POST /api/polka/webhooks", conf.polkaWebhook)
+
 	server := http.Server{
 		Handler: mux,
 		Addr:    ":8080"}
@@ -77,6 +79,52 @@ func healthCheck(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Add("Content-Type", "text/plain; charset=utf-8")
 	writer.WriteHeader(200)
 	writer.Write([]byte("OK\n"))
+}
+
+func (cfg *apiConfig) polkaWebhook(w http.ResponseWriter, r *http.Request) {
+	type webookRequest struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+
+	var data webookRequest
+	if err := decoder.Decode(&data); err != nil {
+		respondWithError(w, http.StatusNoContent, "Failed ot read user data")
+		return
+	}
+
+	if data.Event != "user.upgraded" {
+		respondWithError(w, http.StatusNoContent, "Invalid event.")
+		return
+	}
+
+	uid, err := uuid.Parse(data.Data.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusNoContent, "Failed to parse uuid.")
+		return
+	}
+
+	user, err := cfg.db.GetUserByUUID(context.Background(), uid)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "User not found.")
+		return
+	}
+
+	params := database.SetChirpRedParams{
+		ID:          user.ID,
+		IsChirpyRed: true,
+	}
+
+	if err := cfg.db.SetChirpRed(context.Background(), params); err != nil {
+		respondWithError(w, http.StatusNoContent, "Failed to set chirp red.")
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, "")
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
@@ -106,17 +154,19 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type response struct {
-		Id         string    `json:"id"`
-		Created_at time.Time `json:"created_at"`
-		Updated_at time.Time `json:"updated_at"`
-		Email      string    `json:"email"`
+		Id          string    `json:"id"`
+		Created_at  time.Time `json:"created_at"`
+		Updated_at  time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 
 	respondWithJSON(w, http.StatusCreated, response{
-		Id:         user.ID.String(),
-		Created_at: user.CreatedAt,
-		Updated_at: user.UpdatedAt,
-		Email:      user.Email,
+		Id:          user.ID.String(),
+		Created_at:  user.CreatedAt,
+		Updated_at:  user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	})
 }
 
@@ -141,17 +191,19 @@ func (cfg *apiConfig) getUserByEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type response struct {
-		Id         string    `json:"id"`
-		Created_at time.Time `json:"created_at"`
-		Updated_at time.Time `json:"updated_at"`
-		Email      string    `json:"email"`
+		Id          string    `json:"id"`
+		Created_at  time.Time `json:"created_at"`
+		Updated_at  time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 
 	respondWithJSON(w, http.StatusOK, response{
-		Id:         user.ID.String(),
-		Created_at: user.CreatedAt,
-		Updated_at: user.UpdatedAt,
-		Email:      user.Email,
+		Id:          user.ID.String(),
+		Created_at:  user.CreatedAt,
+		Updated_at:  user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	})
 }
 
@@ -222,6 +274,7 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		Email        string    `json:"email"`
 		Token        string    `json:"token"`
 		RefreshToken string    `json:"refresh_token"`
+		IsChirpyRed  bool      `json:"is_chirpy_red"`
 	}
 
 	respondWithJSON(w, http.StatusOK, response{
@@ -231,6 +284,7 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        jwt,
 		RefreshToken: refreshToken,
+		IsChirpyRed:  user.IsChirpyRed,
 	})
 }
 
