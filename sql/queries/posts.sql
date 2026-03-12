@@ -12,6 +12,9 @@ RETURNING *;
 -- name: GetAllPosts :many
 SELECT * FROM posts ORDER BY created_at ASC;
 
+-- name: GetPostFromUserId :many
+SELECT * FROM posts WHERE user_id = $1 ORDER BY created_at ASC;
+
 -- name: GetPost :one
 SELECT * FROM posts WHERE id = $1;
 

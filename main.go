@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -82,6 +83,13 @@ func healthCheck(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (cfg *apiConfig) polkaWebhook(w http.ResponseWriter, r *http.Request) {
+
+	_, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
 	type webookRequest struct {
 		Event string `json:"event"`
 		Data  struct {
@@ -508,18 +516,39 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
 
-	chirps, err := cfg.db.GetAllPosts(context.Background())
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to fetch chirps from database")
-		return
-	}
-
 	type chirpResponse struct {
 		Id        uuid.UUID `json:"id"`
 		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
 		Body      string    `json:"body"`
 		UserId    uuid.UUID `json:"user_id"`
+	}
+
+	var chirps []database.Post
+
+	if auid, err := uuid.Parse(r.URL.Query().Get("author_id")); err == nil {
+		chirps, err := cfg.db.GetPostFromUserId(context.Background(), auid)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch chirp from database.")
+			return
+		}
+
+		if len(chirps) <= 0 {
+			respondWithError(w, http.StatusInternalServerError, "UUID has no chirps.")
+			return
+		}
+	} else {
+		chirps, err = cfg.db.GetAllPosts(context.Background())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Failed to fetch chirps from database.")
+			return
+		}
+	}
+
+	if r.URL.Query().Get("sort") == "desc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+		})
 	}
 
 	items := make([]chirpResponse, len(chirps))

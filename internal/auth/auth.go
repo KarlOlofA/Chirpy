@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -87,6 +88,30 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	}
 
 	return uid, nil
+}
+
+func GetAPIKey(headers http.Header) (string, error) {
+	header := headers.Get("Authorization")
+
+	if len(header) <= 0 {
+		return "", errors.New("Apikey too short")
+	}
+	prefix := header[:len("ApiKey ")]
+	if strings.ToLower(prefix) != "apikey " {
+		return strings.ToLower(prefix), errors.New("Invalid apikey token")
+	}
+	apiKey := strings.Split(header, "ApiKey ")[1]
+
+	key := os.Getenv("POLKA_KEY")
+
+	fmt.Printf("Header -> '%s'\n", header)
+	fmt.Printf("APIKey Key -> '%s'\n", apiKey)
+	fmt.Printf("OS Key -> '%s'\n", key)
+
+	if apiKey == key {
+		return key, nil
+	}
+	return "", errors.New("Authorization API key is not valid.")
 }
 
 func GetBearerToken(headers http.Header) (string, error) {
